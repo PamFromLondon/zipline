@@ -58,7 +58,7 @@ Risk Report
 import logbook
 import numpy as np
 
-import zipline.finance.trading as trading
+from zipline.finance import trading
 import zipline.utils.math_utils as zp_math
 
 log = logbook.Logger('Risk')
@@ -187,7 +187,7 @@ def alpha(algorithm_period_return, treasury_period_return,
 def get_treasury_rate(treasury_curves, treasury_duration, day):
     rate = None
 
-    curve = treasury_curves[day]
+    curve = treasury_curves.ix[day]
     # 1month note data begins in 8/2001,
     # so we can use 3month instead.
     idx = TREASURY_DURATIONS.index(treasury_duration)
@@ -233,12 +233,13 @@ def select_treasury_duration(start_date, end_date):
     return treasury_duration
 
 
-def choose_treasury(treasury_curves, start_date, end_date):
-    treasury_duration = select_treasury_duration(start_date, end_date)
+def choose_treasury(select_treasury, treasury_curves, start_date, end_date,
+                    compound=True):
+    treasury_duration = select_treasury(start_date, end_date)
     end_day = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
     search_day = None
 
-    if end_day in treasury_curves:
+    if end_day in treasury_curves.index:
         rate = get_treasury_rate(treasury_curves,
                                  treasury_duration,
                                  end_day)
@@ -274,7 +275,10 @@ treasury history range."
 
     if search_day:
         td = end_date - start_date
-        return rate * (td.days + 1) / 365
+        if compound:
+            return rate * (td.days + 1) / 365
+        else:
+            return rate
 
     message = "No rate for end date = {dt} and term = {term}. Check \
 that date doesn't exceed treasury history range."

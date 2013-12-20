@@ -12,11 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import datetime
 import hashlib
 import os
 
 import numpy as np
+import pandas as pd
+import pytz
 import xlrd
 import requests
 
@@ -43,6 +45,9 @@ ANSWER_KEY_BUCKET_NAME = 'zipline-test_data'
 ANSWER_KEY_DL_TEMPLATE = """
 https://s3.amazonaws.com/zipline-test-data/risk/{md5}/risk-answer-key.xlsx
 """.strip()
+
+LATEST_ANSWER_KEY_URL = ANSWER_KEY_DL_TEMPLATE.format(
+    md5=ANSWER_KEY_CHECKSUMS[-1])
 
 
 def answer_key_signature():
@@ -115,11 +120,13 @@ class DataIndex(object):
     The python-excel libraries use 0 index, while the spreadsheet in a GUI
     uses a 1 index.
     """
-    def __init__(self, sheet_name, col, row_start, row_end):
+    def __init__(self, sheet_name, col, row_start, row_end,
+                 value_type='float'):
         self.sheet_name = sheet_name
         self.col = col
         self.row_start = row_start
         self.row_end = row_end
+        self.value_type = value_type
 
     @property
     def col_index(self):
@@ -144,70 +151,102 @@ class DataIndex(object):
 
 class AnswerKey(object):
 
-    RETURNS = DataIndex('Sim Period', 'D', 4, 255)
+    INDEXES = {
+        'RETURNS': DataIndex('Sim Period', 'D', 4, 255),
 
-    # Below matches the inconsistent capitalization in spreadsheet
-    BENCHMARK_PERIOD_RETURNS = {
-        'Monthly': DataIndex('s_p', 'P', 8, 19),
-        '3-Month': DataIndex('s_p', 'Q', 10, 19),
-        '6-month': DataIndex('s_p', 'R', 13, 19),
-        'year': DataIndex('s_p', 'S', 19, 19),
-    }
+        'BENCHMARK': {
+            'Dates': DataIndex('s_p', 'A', 4, 254, value_type='date'),
+            'Returns': DataIndex('s_p', 'H', 4, 254)
+        },
 
-    BENCHMARK_PERIOD_VOLATILITY = {
-        'Monthly': DataIndex('s_p', 'T', 8, 19),
-        '3-Month': DataIndex('s_p', 'U', 10, 19),
-        '6-month': DataIndex('s_p', 'V', 13, 19),
-        'year': DataIndex('s_p', 'W', 19, 19),
-    }
+        # Below matches the inconsistent capitalization in spreadsheet
+        'BENCHMARK_PERIOD_RETURNS': {
+            'Monthly': DataIndex('s_p', 'P', 8, 19),
+            '3-Month': DataIndex('s_p', 'Q', 10, 19),
+            '6-month': DataIndex('s_p', 'R', 13, 19),
+            'year': DataIndex('s_p', 'S', 19, 19),
+        },
 
-    ALGORITHM_PERIOD_RETURNS = {
-        'Monthly': DataIndex('Sim Period', 'V', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'W', 25, 34),
-        '6-month': DataIndex('Sim Period', 'X', 28, 34),
-        'year': DataIndex('Sim Period', 'Y', 34, 34),
-    }
+        'BENCHMARK_PERIOD_VOLATILITY': {
+            'Monthly': DataIndex('s_p', 'T', 8, 19),
+            '3-Month': DataIndex('s_p', 'U', 10, 19),
+            '6-month': DataIndex('s_p', 'V', 13, 19),
+            'year': DataIndex('s_p', 'W', 19, 19),
+        },
 
-    ALGORITHM_PERIOD_VOLATILITY = {
-        'Monthly': DataIndex('Sim Period', 'Z', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'AA', 25, 34),
-        '6-month': DataIndex('Sim Period', 'AB', 28, 34),
-        'year': DataIndex('Sim Period', 'AC', 34, 34),
-    }
+        'ALGORITHM_PERIOD_RETURNS': {
+            'Monthly': DataIndex('Sim Period', 'V', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'W', 25, 34),
+            '6-month': DataIndex('Sim Period', 'X', 28, 34),
+            'year': DataIndex('Sim Period', 'Y', 34, 34),
+        },
 
-    ALGORITHM_PERIOD_SHARPE = {
-        'Monthly': DataIndex('Sim Period', 'AD', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'AE', 25, 34),
-        '6-month': DataIndex('Sim Period', 'AF', 28, 34),
-        'year': DataIndex('Sim Period', 'AG', 34, 34),
-    }
+        'ALGORITHM_PERIOD_VOLATILITY': {
+            'Monthly': DataIndex('Sim Period', 'Z', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'AA', 25, 34),
+            '6-month': DataIndex('Sim Period', 'AB', 28, 34),
+            'year': DataIndex('Sim Period', 'AC', 34, 34),
+        },
 
-    ALGORITHM_PERIOD_BETA = {
-        'Monthly': DataIndex('Sim Period', 'AH', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'AI', 25, 34),
-        '6-month': DataIndex('Sim Period', 'AJ', 28, 34),
-        'year': DataIndex('Sim Period', 'AK', 34, 34),
-    }
+        'ALGORITHM_PERIOD_SHARPE': {
+            'Monthly': DataIndex('Sim Period', 'AD', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'AE', 25, 34),
+            '6-month': DataIndex('Sim Period', 'AF', 28, 34),
+            'year': DataIndex('Sim Period', 'AG', 34, 34),
+        },
 
-    ALGORITHM_PERIOD_ALPHA = {
-        'Monthly': DataIndex('Sim Period', 'AL', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'AM', 25, 34),
-        '6-month': DataIndex('Sim Period', 'AN', 28, 34),
-        'year': DataIndex('Sim Period', 'AO', 34, 34),
-    }
+        'ALGORITHM_PERIOD_BETA': {
+            'Monthly': DataIndex('Sim Period', 'AH', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'AI', 25, 34),
+            '6-month': DataIndex('Sim Period', 'AJ', 28, 34),
+            'year': DataIndex('Sim Period', 'AK', 34, 34),
+        },
 
-    ALGORITHM_PERIOD_BENCHMARK_VARIANCE = {
-        'Monthly': DataIndex('Sim Period', 'BB', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'BC', 25, 34),
-        '6-month': DataIndex('Sim Period', 'BD', 28, 34),
-        'year': DataIndex('Sim Period', 'BE', 34, 34),
-    }
+        'ALGORITHM_PERIOD_ALPHA': {
+            'Monthly': DataIndex('Sim Period', 'AL', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'AM', 25, 34),
+            '6-month': DataIndex('Sim Period', 'AN', 28, 34),
+            'year': DataIndex('Sim Period', 'AO', 34, 34),
+        },
 
-    ALGORITHM_PERIOD_COVARIANCE = {
-        'Monthly': DataIndex('Sim Period', 'AX', 23, 34),
-        '3-Month': DataIndex('Sim Period', 'AY', 25, 34),
-        '6-month': DataIndex('Sim Period', 'AZ', 28, 34),
-        'year': DataIndex('Sim Period', 'BA', 34, 34),
+        'ALGORITHM_PERIOD_BENCHMARK_VARIANCE': {
+            'Monthly': DataIndex('Sim Period', 'BB', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'BC', 25, 34),
+            '6-month': DataIndex('Sim Period', 'BD', 28, 34),
+            'year': DataIndex('Sim Period', 'BE', 34, 34),
+        },
+
+        'ALGORITHM_PERIOD_COVARIANCE': {
+            'Monthly': DataIndex('Sim Period', 'AX', 23, 34),
+            '3-Month': DataIndex('Sim Period', 'AY', 25, 34),
+            '6-month': DataIndex('Sim Period', 'AZ', 28, 34),
+            'year': DataIndex('Sim Period', 'BA', 34, 34),
+        },
+
+        'ALGORITHM_RETURN_VALUES': DataIndex(
+            'Sim Cumulative', 'D', 4, 254),
+
+        'ALGORITHM_CUMULATIVE_VOLATILITY': DataIndex(
+            'Sim Cumulative', 'P', 4, 254),
+
+        'ALGORITHM_CUMULATIVE_SHARPE': DataIndex(
+            'Sim Cumulative', 'R', 4, 254),
+
+        'CUMULATIVE_DOWNSIDE_RISK': DataIndex(
+            'Sim Cumulative', 'U', 4, 254),
+
+        'CUMULATIVE_SORTINO': DataIndex(
+            'Sim Cumulative', 'V', 4, 254),
+
+        'CUMULATIVE_INFORMATION': DataIndex(
+            'Sim Cumulative', 'Y', 4, 254),
+
+        'CUMULATIVE_BETA': DataIndex(
+            'Sim Cumulative', 'AB', 4, 254),
+
+        'CUMULATIVE_ALPHA': DataIndex(
+            'Sim Cumulative', 'AC', 4, 254),
+
     }
 
     def __init__(self):
@@ -215,11 +254,66 @@ class AnswerKey(object):
 
         self.sheets = {}
         self.sheets['Sim Period'] = self.workbook.sheet_by_name('Sim Period')
+        self.sheets['Sim Cumulative'] = self.workbook.sheet_by_name(
+            'Sim Cumulative')
         self.sheets['s_p'] = self.workbook.sheet_by_name('s_p')
 
-    def get_values(self, data_index, decimal=4):
-        return [np.round(x, decimal) for x in
-                self.sheets[data_index.sheet_name].col_values(
-                    data_index.col_index,
-                    data_index.row_start_index,
-                    data_index.row_end_index + 1)]
+        for name, index in self.INDEXES.items():
+            if isinstance(index, dict):
+                subvalues = {}
+                for subkey, subindex in index.items():
+                    subvalues[subkey] = self.get_values(subindex)
+                setattr(self, name, subvalues)
+            else:
+                setattr(self, name, self.get_values(index))
+
+    def parse_date_value(self, value):
+        return xlrd.xldate_as_tuple(value, 0)
+
+    def parse_float_value(self, value):
+        return value if value != '' else np.nan
+
+    def get_raw_values(self, data_index):
+        return self.sheets[data_index.sheet_name].col_values(
+            data_index.col_index,
+            data_index.row_start_index,
+            data_index.row_end_index + 1)
+
+    @property
+    def value_type_to_value_func(self):
+        return {
+            'float': self.parse_float_value,
+            'date': self.parse_date_value,
+        }
+
+    def get_values(self, data_index):
+        value_parser = self.value_type_to_value_func[data_index.value_type]
+        return map(value_parser, self.get_raw_values(data_index))
+
+
+ANSWER_KEY = AnswerKey()
+
+BENCHMARK_DATES = ANSWER_KEY.BENCHMARK['Dates']
+BENCHMARK_RETURNS = ANSWER_KEY.BENCHMARK['Returns']
+DATES = [datetime.datetime(*x, tzinfo=pytz.UTC) for x in BENCHMARK_DATES]
+BENCHMARK = pd.Series(dict(zip(DATES, BENCHMARK_RETURNS)))
+ALGORITHM_RETURNS = pd.Series(
+    dict(zip(DATES, ANSWER_KEY.ALGORITHM_RETURN_VALUES)))
+RETURNS_DATA = pd.DataFrame({'Benchmark Returns': BENCHMARK,
+                             'Algorithm Returns': ALGORITHM_RETURNS})
+RISK_CUMULATIVE = pd.DataFrame({
+    'volatility': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.ALGORITHM_CUMULATIVE_VOLATILITY))),
+    'sharpe': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.ALGORITHM_CUMULATIVE_SHARPE))),
+    'downside_risk': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.CUMULATIVE_DOWNSIDE_RISK))),
+    'sortino': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.CUMULATIVE_SORTINO))),
+    'information': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.CUMULATIVE_INFORMATION))),
+    'alpha': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.CUMULATIVE_ALPHA))),
+    'beta': pd.Series(dict(zip(
+        DATES, ANSWER_KEY.CUMULATIVE_BETA))),
+})

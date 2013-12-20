@@ -62,11 +62,8 @@ setup(
         'Topic :: System :: Distributed Computing',
     ],
     install_requires=[
-        'delorean',
-        'msgpack-python',
         'iso8601',
         'Logbook',
-        'blist',
         'pytz',
         'requests',
         'numpy',

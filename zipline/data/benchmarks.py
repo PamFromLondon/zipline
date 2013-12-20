@@ -21,13 +21,15 @@ import csv
 from functools import partial
 
 import requests
+import pandas as pd
 
 from . loader_utils import (
     date_conversion,
     source_to_records,
     Mapping
 )
-from zipline.protocol import DailyReturn
+
+DailyReturn = collections.namedtuple('DailyReturn', ['date', 'returns'])
 
 
 class BenchmarkDataNotFoundError(Exception):
@@ -125,7 +127,8 @@ def get_benchmark_returns(symbol, start_date=None, end_date=None):
         else:
             prev_close = data_points[i - 1]['close']
             returns = (data_point['close'] - prev_close) / prev_close
-        daily_return = DailyReturn(date=data_point['date'], returns=returns)
+        date = pd.tseries.tools.normalize_date(data_point['date'])
+        daily_return = DailyReturn(date=date, returns=returns)
         benchmark_returns.append(daily_return)
 
     return benchmark_returns

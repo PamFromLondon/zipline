@@ -67,11 +67,8 @@ Dependencies
 * numpy (>= 1.6.0)
 * pandas (>= 0.9.0)
 * pytz
-* msgpack-python
 * Logbook
-* blist
 * requests
-* delorean
 * iso8601
 * [python-dateutil](https://pypi.python.org/pypi/python-dateutil) (>= 2.1)
 
